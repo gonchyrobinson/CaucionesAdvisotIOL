@@ -1,0 +1,22 @@
+{
+  "alerts": [
+    {
+      "symbol": "CAUCI1",
+      "days": 1,
+      "type": "colocador",
+      "condition": ">=",
+      "target_rate": 35.5,
+      "enabled": true,
+      "description": "Alert when 1-day caucion lender rate reaches 35.5%"
+    },
+    {
+      "symbol": "CAUCI7",
+      "days": 7,
+      "type": "tomador",
+      "condition": "<=",
+      "target_rate": 40.0,
+      "enabled": true,
+      "description": "Alert when 7-day caucion borrower rate drops to 40%"
+    }
+  ]
+}

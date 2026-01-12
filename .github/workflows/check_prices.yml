@@ -1,0 +1,35 @@
+name: Check Cauciones Prices
+
+on:
+  schedule:
+    # Runs every 5 minutes (minimum GitHub Actions interval)
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+    # Allow manual triggering for testing
+
+jobs:
+  check_prices:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Price Checker
+        run: python main.py
+        env:
+          IOL_USERNAME: ${{ secrets.IOL_USERNAME }}
+          IOL_PASSWORD: ${{ secrets.IOL_PASSWORD }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
