@@ -1,9 +1,6 @@
 name: Check Cauciones Prices
 
 on:
-  schedule:
-    # Runs every 5 minutes (minimum GitHub Actions interval)
-    - cron: '*/5 * * * *'
   workflow_dispatch:
     # Allow manual triggering for testing
 
