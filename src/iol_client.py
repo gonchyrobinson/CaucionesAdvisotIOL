@@ -25,16 +25,21 @@ class IOLClient:
         }
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
 
-        response = requests.post(self.TOKEN_URL, data=payload, headers=headers)
+        try:
+            response = requests.post(self.TOKEN_URL, data=payload, headers=headers, timeout=30)
 
-        if response.status_code == 200:
-            data = response.json()
-            self.access_token = data.get("access_token")
-            self.refresh_token = data.get("refresh_token")
-            return True
+            if response.status_code == 200:
+                data = response.json()
+                self.access_token = data.get("access_token")
+                self.refresh_token = data.get("refresh_token")
+                print("Authentication successful")
+                return True
 
-        print(f"Authentication failed: {response.status_code} - {response.text}")
-        return False
+            print(f"Authentication failed: {response.status_code} - {response.text}")
+            return False
+        except requests.exceptions.RequestException as e:
+            print(f"Authentication error: {e}")
+            return False
 
     def _get_headers(self) -> dict:
         """Get headers with authorization token."""
@@ -49,28 +54,43 @@ class IOLClient:
             if not self.authenticate():
                 return []
 
-        url = f"{self.BASE_URL}/api/v2/Cotizaciones/Cauciones/argentina"
-        response = requests.get(url, headers=self._get_headers())
+        # Try the correct endpoint for cauciones
+        # The API uses: /api/v2/{mercado}/Titulos/{instrumento}
+        url = f"{self.BASE_URL}/api/v2/bCBA/Titulos/cauciones"
+        
+        try:
+            print(f"Fetching cauciones from: {url}")
+            response = requests.get(url, headers=self._get_headers(), timeout=30)
 
-        if response.status_code == 401:
-            # Token expired, try to re-authenticate
-            if self.authenticate():
-                response = requests.get(url, headers=self._get_headers())
-            else:
-                return []
+            if response.status_code == 401:
+                print("Token expired, re-authenticating...")
+                if self.authenticate():
+                    response = requests.get(url, headers=self._get_headers(), timeout=30)
+                else:
+                    return []
 
-        if response.status_code == 200:
-            return response.json()
+            if response.status_code == 200:
+                data = response.json()
+                print(f"Received {len(data.get('titulos', data)) if isinstance(data, dict) else len(data)} cauciones")
+                # The response might be nested under 'titulos'
+                if isinstance(data, dict) and 'titulos' in data:
+                    return data['titulos']
+                return data if isinstance(data, list) else []
 
-        print(f"Failed to fetch cauciones: {response.status_code} - {response.text}")
-        return []
+            print(f"Failed to fetch cauciones: {response.status_code}")
+            print(f"Response: {response.text[:500] if response.text else 'Empty'}")
+            return []
+        except requests.exceptions.RequestException as e:
+            print(f"Request error: {e}")
+            return []
 
     def get_caucion_by_days(self, days: int) -> Optional[dict]:
         """Get caucion data for a specific number of days."""
         cauciones = self.get_cauciones()
 
         for caucion in cauciones:
-            if caucion.get("plazo") == days:
+            plazo = caucion.get("plazo") or caucion.get("diasVencimiento")
+            if plazo == days:
                 return caucion
 
         return None

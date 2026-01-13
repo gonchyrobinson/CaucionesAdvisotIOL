@@ -36,10 +36,19 @@ def check_condition(current_value: float, target_value: float, condition: str) -
 
 def get_rate_from_caucion(caucion_data: dict, rate_type: str) -> Optional[float]:
     """Extract the appropriate rate from caucion data."""
+    # Try different field names the API might use
     if rate_type == "colocador":
-        return caucion_data.get("tasaColocadora")
+        return (
+            caucion_data.get("tasaColocadora") or 
+            caucion_data.get("precioCompra") or
+            caucion_data.get("puntas", {}).get("precioCompra")
+        )
     elif rate_type == "tomador":
-        return caucion_data.get("tasaTomadora")
+        return (
+            caucion_data.get("tasaTomadora") or 
+            caucion_data.get("precioVenta") or
+            caucion_data.get("puntas", {}).get("precioVenta")
+        )
     return None
 
 
@@ -84,8 +93,17 @@ def run_price_check():
         notifier.send_error_message("Failed to fetch cauciones data from IOL API")
         return False
 
-    # Build a lookup by days (plazo)
-    cauciones_by_days = {c.get("plazo"): c for c in cauciones}
+    # Build a lookup by days (plazo) - handle different field names
+    cauciones_by_days = {}
+    for c in cauciones:
+        days_key = c.get("plazo") or c.get("diasVencimiento") or c.get("cantidadDias")
+        if days_key:
+            cauciones_by_days[days_key] = c
+            print(f"Found caucion: {days_key} days - {c}")
+    
+    if not cauciones_by_days:
+        print("Warning: Could not parse cauciones data. Raw data sample:")
+        print(cauciones[:2] if len(cauciones) > 2 else cauciones)
 
     # Check each enabled alert
     alerts_triggered = 0
