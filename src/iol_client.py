@@ -1,125 +1,96 @@
-"""InvertirOnline API client for fetching cauciones prices."""
+"""InvertirOnline API client using iol-api library."""
 
-import requests
-from typing import Optional
+import asyncio
+from typing import Optional, List, Dict, Any
+
+from iol_api import IOLClient
+from iol_api.constants import Mercado
 
 
-class IOLClient:
-    """Client for interacting with InvertirOnline API."""
-
-    BASE_URL = "https://api.invertironline.com"
-    TOKEN_URL = f"{BASE_URL}/token"
+class IOLClientWrapper:
+    """Wrapper around iol-api library for fetching cauciones data."""
 
     def __init__(self, username: str, password: str):
         self.username = username
         self.password = password
-        self.access_token: Optional[str] = None
-        self.refresh_token: Optional[str] = None
+        self._client: Optional[IOLClient] = None
 
-    def authenticate(self) -> bool:
-        """Authenticate with IOL API and obtain access token."""
-        payload = {
-            "username": self.username,
-            "password": self.password,
-            "grant_type": "password"
-        }
-        headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    def _get_client(self) -> IOLClient:
+        """Get or create IOL client instance."""
+        if self._client is None:
+            self._client = IOLClient(self.username, self.password)
+        return self._client
 
+    async def _get_titulo_async(self, symbol: str, mercado: Mercado = Mercado.BCBA) -> Optional[Dict[str, Any]]:
+        """Get titulo data asynchronously."""
         try:
-            response = requests.post(self.TOKEN_URL, data=payload, headers=headers, timeout=30)
+            client = self._get_client()
+            data = await client.get_titulo(symbol, mercado)
+            return data
+        except Exception as e:
+            print(f"Error getting {symbol}: {e}")
+            return None
 
-            if response.status_code == 200:
-                data = response.json()
-                self.access_token = data.get("access_token")
-                self.refresh_token = data.get("refresh_token")
-                print("Authentication successful")
-                return True
+    async def _get_cotizacion_async(self, symbol: str, mercado: Mercado = Mercado.BCBA) -> Optional[Dict[str, Any]]:
+        """Get cotizacion data asynchronously."""
+        try:
+            client = self._get_client()
+            data = await client.get_cotizacion(symbol, mercado)
+            return data
+        except Exception as e:
+            print(f"Error getting cotizacion for {symbol}: {e}")
+            return None
 
-            print(f"Authentication failed: {response.status_code} - {response.text}")
-            return False
-        except requests.exceptions.RequestException as e:
-            print(f"Authentication error: {e}")
-            return False
-
-    def _get_headers(self) -> dict:
-        """Get headers with authorization token."""
-        return {
-            "Authorization": f"Bearer {self.access_token}",
-            "Content-Type": "application/json"
-        }
-
-    def get_cauciones(self) -> list:
-        """Fetch cauciones prices from IOL API."""
-        if not self.access_token:
-            if not self.authenticate():
-                return []
-
+    async def _get_cauciones_async(self) -> List[Dict[str, Any]]:
+        """Fetch cauciones data asynchronously."""
         cauciones = []
         
-        # Based on API docs: /api/v2/{mercado}/Titulos/{simbolo}/Cotizacion
-        # tipo includes: cAUCIONESPESOS, cAUCIONESDOLARES
-        # Common caucion symbols in Argentina: PESOS (1 day), 7DIAS, 14DIAS, etc.
+        # Test API connectivity first
+        print("Testing API connectivity with GGAL...")
+        test_data = await self._get_cotizacion_async("GGAL", Mercado.BCBA)
+        if test_data:
+            print(f"API working. GGAL price: {test_data.get('ultimoPrecio', 'N/A')}")
+        else:
+            print("Warning: Could not fetch GGAL data")
         
-        # Possible caucion symbols - try various formats
+        # Try to get cauciones - possible symbol formats
+        # In IOL, cauciones might use symbols like: PESOS1D, PESOS7D, etc.
         caucion_symbols = [
-            # Pesos cauciones by days
-            ("PESOS", 1), ("1", 1), ("CI1", 1),
-            ("7DIAS", 7), ("7", 7), ("CI7", 7),
-            ("14DIAS", 14), ("14", 14), ("CI14", 14),
-            ("30DIAS", 30), ("30", 30), ("CI30", 30),
-            # Alternative formats
-            ("CAUC.1", 1), ("CAUC.7", 7), ("CAUC.14", 14), ("CAUC.30", 30),
-            ("CAUCPESOS1", 1), ("CAUCPESOS7", 7),
+            ("PESOS1D", 1), ("PESOS7D", 7), ("PESOS14D", 14), ("PESOS30D", 30),
+            ("1D", 1), ("7D", 7), ("14D", 14), ("30D", 30),
+            ("CAUC1", 1), ("CAUC7", 7), ("CAUC14", 14), ("CAUC30", 30),
         ]
         
-        mercado = "bCBA"  # Main Argentine market
-        
-        # First try to get title info to discover the format
-        print(f"Testing API with known stock symbol (GGAL)...")
-        test_url = f"{self.BASE_URL}/api/v2/{mercado}/Titulos/GGAL/Cotizacion"
-        try:
-            response = requests.get(test_url, headers=self._get_headers(), timeout=30)
-            print(f"GGAL test: {response.status_code}")
-            if response.status_code == 200:
-                print(f"API is working. Response sample: {str(response.json())[:200]}")
-        except Exception as e:
-            print(f"GGAL test error: {e}")
-        
-        # Try each caucion symbol
-        print(f"\nTrying caucion symbols in mercado {mercado}...")
+        print("\nTrying caucion symbols...")
         for symbol, days in caucion_symbols:
-            url = f"{self.BASE_URL}/api/v2/{mercado}/Titulos/{symbol}/Cotizacion"
-            try:
-                response = requests.get(url, headers=self._get_headers(), timeout=10)
-                if response.status_code == 200:
-                    data = response.json()
-                    data['plazo'] = days
-                    data['symbol'] = symbol
-                    cauciones.append(data)
-                    print(f"  SUCCESS {symbol}: precio={data.get('ultimoPrecio', 'N/A')}")
-                elif response.status_code != 404:
-                    print(f"  {symbol}: {response.status_code}")
-            except Exception as e:
-                continue
+            data = await self._get_cotizacion_async(symbol, Mercado.BCBA)
+            if data and data.get('ultimoPrecio'):
+                data['plazo'] = days
+                data['symbol'] = symbol
+                cauciones.append(data)
+                print(f"  Found {symbol}: {data.get('ultimoPrecio')}")
         
-        if cauciones:
-            print(f"\nFound {len(cauciones)} cauciones")
-            return cauciones
-        
-        # If no cauciones found, try to list all available instruments
-        print("\nNo cauciones found with known symbols.")
-        print("You may need to check InvertirOnline's platform for exact caucion symbols.")
-        print("Or contact IOL support to get the list of caucion symbols available via API.")
+        if not cauciones:
+            print("\nNo cauciones found with standard symbols.")
+            print("The iol-api library might not support cauciones directly.")
+            print("Cauciones in IOL are selected by currency + days, not by symbol.")
         
         return cauciones
 
-    def get_caucion_by_days(self, days: int) -> Optional[dict]:
+    def get_cauciones(self) -> List[Dict[str, Any]]:
+        """Fetch cauciones data (sync wrapper)."""
+        return asyncio.run(self._get_cauciones_async())
+
+    def get_caucion_by_days(self, days: int) -> Optional[Dict[str, Any]]:
         """Get caucion data for a specific number of days."""
         cauciones = self.get_cauciones()
-
+        
         for caucion in cauciones:
-            plazo = caucion.get("plazo") or caucion.get("diasVencimiento")
-            if plazo == days:
+            if caucion.get("plazo") == days:
                 return caucion
-
+        
         return None
+
+
+# Alias for backwards compatibility
+IOLClient = IOLClientWrapper
