@@ -49,78 +49,68 @@ class IOLClient:
         }
 
     def get_cauciones(self) -> list:
-        """Fetch cauciones prices from IOL API by querying individual symbols."""
+        """Fetch cauciones prices from IOL API."""
         if not self.access_token:
             if not self.authenticate():
                 return []
 
-        # Cauciones have symbols like CAUC1D, CAUC7D, CAUC14D, etc. (1 day, 7 days, 14 days)
-        # The format is: /api/v2/{mercado}/Titulos/{simbolo}/Cotizacion
-        caucion_symbols = [
-            ("CAUC1D", 1),   # 1 day
-            ("CAUC7D", 7),   # 7 days
-            ("CAUC14D", 14), # 14 days
-            ("CAUC30D", 30), # 30 days
-        ]
-        
-        mercados = ["bCBA", "BCBA", "argentina"]
         cauciones = []
         
-        # First, try to get the panel of cauciones
-        panel_endpoints = [
-            "/api/v2/Cotizaciones/Panel/Cauciones/argentina",
-            "/api/v2/bCBA/Titulos/Cauciones/Cotizacion",
+        # Based on API docs: /api/v2/{mercado}/Titulos/{simbolo}/Cotizacion
+        # tipo includes: cAUCIONESPESOS, cAUCIONESDOLARES
+        # Common caucion symbols in Argentina: PESOS (1 day), 7DIAS, 14DIAS, etc.
+        
+        # Possible caucion symbols - try various formats
+        caucion_symbols = [
+            # Pesos cauciones by days
+            ("PESOS", 1), ("1", 1), ("CI1", 1),
+            ("7DIAS", 7), ("7", 7), ("CI7", 7),
+            ("14DIAS", 14), ("14", 14), ("CI14", 14),
+            ("30DIAS", 30), ("30", 30), ("CI30", 30),
+            # Alternative formats
+            ("CAUC.1", 1), ("CAUC.7", 7), ("CAUC.14", 14), ("CAUC.30", 30),
+            ("CAUCPESOS1", 1), ("CAUCPESOS7", 7),
         ]
         
-        for endpoint in panel_endpoints:
-            url = f"{self.BASE_URL}{endpoint}"
+        mercado = "bCBA"  # Main Argentine market
+        
+        # First try to get title info to discover the format
+        print(f"Testing API with known stock symbol (GGAL)...")
+        test_url = f"{self.BASE_URL}/api/v2/{mercado}/Titulos/GGAL/Cotizacion"
+        try:
+            response = requests.get(test_url, headers=self._get_headers(), timeout=30)
+            print(f"GGAL test: {response.status_code}")
+            if response.status_code == 200:
+                print(f"API is working. Response sample: {str(response.json())[:200]}")
+        except Exception as e:
+            print(f"GGAL test error: {e}")
+        
+        # Try each caucion symbol
+        print(f"\nTrying caucion symbols in mercado {mercado}...")
+        for symbol, days in caucion_symbols:
+            url = f"{self.BASE_URL}/api/v2/{mercado}/Titulos/{symbol}/Cotizacion"
             try:
-                print(f"Trying panel: {url}")
-                response = requests.get(url, headers=self._get_headers(), timeout=30)
+                response = requests.get(url, headers=self._get_headers(), timeout=10)
                 if response.status_code == 200:
                     data = response.json()
-                    print(f"SUCCESS with panel: {endpoint}")
-                    print(f"Data: {data}")
-                    if isinstance(data, dict) and 'titulos' in data:
-                        return data['titulos']
-                    if isinstance(data, list):
-                        return data
-                print(f"  -> {response.status_code}")
+                    data['plazo'] = days
+                    data['symbol'] = symbol
+                    cauciones.append(data)
+                    print(f"  SUCCESS {symbol}: precio={data.get('ultimoPrecio', 'N/A')}")
+                elif response.status_code != 404:
+                    print(f"  {symbol}: {response.status_code}")
             except Exception as e:
-                print(f"  -> Error: {e}")
+                continue
         
-        # If panels fail, try individual symbols
-        for mercado in mercados:
-            print(f"Trying mercado: {mercado}")
-            for symbol, days in caucion_symbols:
-                url = f"{self.BASE_URL}/api/v2/{mercado}/Titulos/{symbol}/Cotizacion"
-                try:
-                    response = requests.get(url, headers=self._get_headers(), timeout=30)
-                    if response.status_code == 200:
-                        data = response.json()
-                        data['plazo'] = days
-                        data['symbol'] = symbol
-                        cauciones.append(data)
-                        print(f"  Got {symbol}: {data.get('ultimoPrecio', 'N/A')}")
-                except Exception as e:
-                    continue
-            
-            if cauciones:
-                print(f"Found {len(cauciones)} cauciones in {mercado}")
-                return cauciones
+        if cauciones:
+            print(f"\nFound {len(cauciones)} cauciones")
+            return cauciones
         
-        # Try alternative approach - get all instruments and filter
-        print("Trying to get all instruments...")
-        try:
-            url = f"{self.BASE_URL}/api/v2/Operaciones"
-            response = requests.get(url, headers=self._get_headers(), timeout=30)
-            if response.status_code == 200:
-                data = response.json()
-                print(f"Operaciones response keys: {data.keys() if isinstance(data, dict) else type(data)}")
-        except Exception as e:
-            print(f"Operaciones error: {e}")
+        # If no cauciones found, try to list all available instruments
+        print("\nNo cauciones found with known symbols.")
+        print("You may need to check InvertirOnline's platform for exact caucion symbols.")
+        print("Or contact IOL support to get the list of caucion symbols available via API.")
         
-        print("Could not fetch cauciones data")
         return cauciones
 
     def get_caucion_by_days(self, days: int) -> Optional[dict]:
