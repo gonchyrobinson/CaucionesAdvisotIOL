@@ -54,35 +54,47 @@ class IOLClient:
             if not self.authenticate():
                 return []
 
-        # Try the correct endpoint for cauciones
-        # The API uses: /api/v2/{mercado}/Titulos/{instrumento}
-        url = f"{self.BASE_URL}/api/v2/bCBA/Titulos/cauciones"
+        # Try multiple possible endpoints for cauciones
+        endpoints_to_try = [
+            "/api/v2/Cotizaciones/Cauciones",
+            "/api/v2/argentina/Titulos/Cauciones", 
+            "/api/v2/bCBA/Titulos/Cauciones",
+            "/api/v2/Cotizaciones/Instrumentos/Cauciones",
+            "/api/v2/Titulos/Cauciones/bCBA",
+        ]
         
-        try:
-            print(f"Fetching cauciones from: {url}")
-            response = requests.get(url, headers=self._get_headers(), timeout=30)
+        for endpoint in endpoints_to_try:
+            url = f"{self.BASE_URL}{endpoint}"
+            try:
+                print(f"Trying endpoint: {url}")
+                response = requests.get(url, headers=self._get_headers(), timeout=30)
 
-            if response.status_code == 401:
-                print("Token expired, re-authenticating...")
-                if self.authenticate():
-                    response = requests.get(url, headers=self._get_headers(), timeout=30)
-                else:
-                    return []
+                if response.status_code == 401:
+                    print("Token expired, re-authenticating...")
+                    if self.authenticate():
+                        response = requests.get(url, headers=self._get_headers(), timeout=30)
+                    else:
+                        continue
 
-            if response.status_code == 200:
-                data = response.json()
-                print(f"Received {len(data.get('titulos', data)) if isinstance(data, dict) else len(data)} cauciones")
-                # The response might be nested under 'titulos'
-                if isinstance(data, dict) and 'titulos' in data:
-                    return data['titulos']
-                return data if isinstance(data, list) else []
+                if response.status_code == 200:
+                    data = response.json()
+                    print(f"SUCCESS with endpoint: {endpoint}")
+                    print(f"Response type: {type(data)}")
+                    if isinstance(data, dict):
+                        print(f"Keys: {data.keys()}")
+                        if 'titulos' in data:
+                            return data['titulos']
+                        return [data] if data else []
+                    return data if isinstance(data, list) else []
 
-            print(f"Failed to fetch cauciones: {response.status_code}")
-            print(f"Response: {response.text[:500] if response.text else 'Empty'}")
-            return []
-        except requests.exceptions.RequestException as e:
-            print(f"Request error: {e}")
-            return []
+                print(f"  -> {response.status_code}: {response.text[:200] if response.text else 'Empty'}")
+                
+            except requests.exceptions.RequestException as e:
+                print(f"  -> Request error: {e}")
+                continue
+        
+        print("All endpoints failed")
+        return []
 
     def get_caucion_by_days(self, days: int) -> Optional[dict]:
         """Get caucion data for a specific number of days."""
