@@ -99,11 +99,30 @@ class IOLClient:
                 if response.status_code == 200:
                     data = response.json()
                     print(f"Found data at {endpoint}: {type(data).__name__}")
-                    if isinstance(data, list) and len(data) > 0:
-                        return data
+                    
+                    if isinstance(data, list):
+                        print(f"  Items count: {len(data)}")
+                        # Print first few items to understand structure
+                        for i, item in enumerate(data[:5]):
+                            print(f"  [{i}]: {item}")
+                        
+                        # Look for caucion-related items
+                        caucion_items = [
+                            item for item in data 
+                            if isinstance(item, dict) and 
+                            ('caucion' in str(item).lower() or 'cauc' in str(item).lower())
+                        ]
+                        if caucion_items:
+                            print(f"\n  Found {len(caucion_items)} caucion-related items:")
+                            for item in caucion_items[:3]:
+                                print(f"    {item}")
+                            return caucion_items
+                    
                     if isinstance(data, dict):
                         print(f"  Keys: {list(data.keys())}")
+                        print(f"  Sample: {str(data)[:500]}")
             except Exception as e:
+                print(f"  Error: {e}")
                 continue
 
         print("\n" + "="*60)
