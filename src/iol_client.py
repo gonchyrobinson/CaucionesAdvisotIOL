@@ -1,96 +1,130 @@
-"""InvertirOnline API client using iol-api library."""
+"""InvertirOnline API client for fetching market data."""
 
-import asyncio
+import requests
 from typing import Optional, List, Dict, Any
 
-from iol_api import IOLClient
-from iol_api.constants import Mercado
 
+class IOLClient:
+    """Client for interacting with InvertirOnline API."""
 
-class IOLClientWrapper:
-    """Wrapper around iol-api library for fetching cauciones data."""
+    BASE_URL = "https://api.invertironline.com"
+    TOKEN_URL = f"{BASE_URL}/token"
 
     def __init__(self, username: str, password: str):
         self.username = username
         self.password = password
-        self._client: Optional[IOLClient] = None
+        self.access_token: Optional[str] = None
+        self.refresh_token: Optional[str] = None
 
-    def _get_client(self) -> IOLClient:
-        """Get or create IOL client instance."""
-        if self._client is None:
-            self._client = IOLClient(self.username, self.password)
-        return self._client
+    def authenticate(self) -> bool:
+        """Authenticate with IOL API and obtain access token."""
+        payload = {
+            "username": self.username,
+            "password": self.password,
+            "grant_type": "password"
+        }
+        headers = {"Content-Type": "application/x-www-form-urlencoded"}
 
-    async def _get_titulo_async(self, symbol: str, mercado: Mercado = Mercado.BCBA) -> Optional[Dict[str, Any]]:
-        """Get titulo data asynchronously."""
         try:
-            client = self._get_client()
-            data = await client.get_titulo(symbol, mercado)
-            return data
-        except Exception as e:
-            print(f"Error getting {symbol}: {e}")
-            return None
+            response = requests.post(self.TOKEN_URL, data=payload, headers=headers, timeout=30)
 
-    async def _get_cotizacion_async(self, symbol: str, mercado: Mercado = Mercado.BCBA) -> Optional[Dict[str, Any]]:
-        """Get cotizacion data asynchronously."""
+            if response.status_code == 200:
+                data = response.json()
+                self.access_token = data.get("access_token")
+                self.refresh_token = data.get("refresh_token")
+                print("Authentication successful")
+                return True
+
+            print(f"Authentication failed: {response.status_code} - {response.text}")
+            return False
+        except requests.exceptions.RequestException as e:
+            print(f"Authentication error: {e}")
+            return False
+
+    def _get_headers(self) -> dict:
+        """Get headers with authorization token."""
+        return {
+            "Authorization": f"Bearer {self.access_token}",
+            "Content-Type": "application/json"
+        }
+
+    def get_cotizacion(self, symbol: str, mercado: str = "bCBA") -> Optional[Dict[str, Any]]:
+        """Get cotizacion for a specific symbol."""
+        if not self.access_token:
+            if not self.authenticate():
+                return None
+
+        url = f"{self.BASE_URL}/api/v2/{mercado}/Titulos/{symbol}/Cotizacion"
         try:
-            client = self._get_client()
-            data = await client.get_cotizacion(symbol, mercado)
-            return data
-        except Exception as e:
-            print(f"Error getting cotizacion for {symbol}: {e}")
+            response = requests.get(url, headers=self._get_headers(), timeout=30)
+            if response.status_code == 200:
+                return response.json()
             return None
-
-    async def _get_cauciones_async(self) -> List[Dict[str, Any]]:
-        """Fetch cauciones data asynchronously."""
-        cauciones = []
-        
-        # Test API connectivity first
-        print("Testing API connectivity with GGAL...")
-        test_data = await self._get_cotizacion_async("GGAL", Mercado.BCBA)
-        if test_data:
-            print(f"API working. GGAL price: {test_data.get('ultimoPrecio', 'N/A')}")
-        else:
-            print("Warning: Could not fetch GGAL data")
-        
-        # Try to get cauciones - possible symbol formats
-        # In IOL, cauciones might use symbols like: PESOS1D, PESOS7D, etc.
-        caucion_symbols = [
-            ("PESOS1D", 1), ("PESOS7D", 7), ("PESOS14D", 14), ("PESOS30D", 30),
-            ("1D", 1), ("7D", 7), ("14D", 14), ("30D", 30),
-            ("CAUC1", 1), ("CAUC7", 7), ("CAUC14", 14), ("CAUC30", 30),
-        ]
-        
-        print("\nTrying caucion symbols...")
-        for symbol, days in caucion_symbols:
-            data = await self._get_cotizacion_async(symbol, Mercado.BCBA)
-            if data and data.get('ultimoPrecio'):
-                data['plazo'] = days
-                data['symbol'] = symbol
-                cauciones.append(data)
-                print(f"  Found {symbol}: {data.get('ultimoPrecio')}")
-        
-        if not cauciones:
-            print("\nNo cauciones found with standard symbols.")
-            print("The iol-api library might not support cauciones directly.")
-            print("Cauciones in IOL are selected by currency + days, not by symbol.")
-        
-        return cauciones
+        except requests.exceptions.RequestException:
+            return None
 
     def get_cauciones(self) -> List[Dict[str, Any]]:
-        """Fetch cauciones data (sync wrapper)."""
-        return asyncio.run(self._get_cauciones_async())
+        """
+        Fetch cauciones data from IOL API.
+        
+        Note: Cauciones in IOL are not accessed via traditional symbols.
+        They are selected by currency (ARS/USD) + days in the web interface.
+        The API might not expose caucion rates directly.
+        """
+        if not self.access_token:
+            if not self.authenticate():
+                return []
+
+        # Test API connectivity
+        print("Testing API with GGAL...")
+        ggal = self.get_cotizacion("GGAL", "bCBA")
+        if ggal:
+            print(f"API working. GGAL: ${ggal.get('ultimoPrecio', 'N/A')}")
+        else:
+            print("Warning: Could not fetch GGAL")
+
+        # Try to find caucion endpoints
+        # Based on API docs, tipo includes: cAUCIONESPESOS, cAUCIONESDOLARES
+        endpoints = [
+            "/api/v2/Cotizaciones/Cauciones",
+            "/api/v2/Cauciones",
+            "/api/v2/Operaciones",
+        ]
+
+        print("\nSearching for caucion data...")
+        for endpoint in endpoints:
+            url = f"{self.BASE_URL}{endpoint}"
+            try:
+                response = requests.get(url, headers=self._get_headers(), timeout=15)
+                if response.status_code == 200:
+                    data = response.json()
+                    print(f"Found data at {endpoint}: {type(data).__name__}")
+                    if isinstance(data, list) and len(data) > 0:
+                        return data
+                    if isinstance(data, dict):
+                        print(f"  Keys: {list(data.keys())}")
+            except Exception as e:
+                continue
+
+        print("\n" + "="*60)
+        print("CAUCIONES NOT AVAILABLE VIA API")
+        print("="*60)
+        print("The IOL API does not appear to expose caucion rates.")
+        print("Cauciones are selected by currency + days in the web UI,")
+        print("not by traditional stock symbols.")
+        print("")
+        print("Options:")
+        print("1. Contact IOL support to ask about caucion API access")
+        print("2. Use web scraping (requires different approach)")
+        print("3. Monitor stocks instead of cauciones")
+        print("="*60)
+        
+        return []
 
     def get_caucion_by_days(self, days: int) -> Optional[Dict[str, Any]]:
         """Get caucion data for a specific number of days."""
         cauciones = self.get_cauciones()
-        
         for caucion in cauciones:
             if caucion.get("plazo") == days:
                 return caucion
-        
         return None
-
-
-# Alias for backwards compatibility
-IOLClient = IOLClientWrapper
