@@ -49,52 +49,79 @@ class IOLClient:
         }
 
     def get_cauciones(self) -> list:
-        """Fetch all cauciones prices from IOL API."""
+        """Fetch cauciones prices from IOL API by querying individual symbols."""
         if not self.access_token:
             if not self.authenticate():
                 return []
 
-        # Try multiple possible endpoints for cauciones
-        endpoints_to_try = [
-            "/api/v2/Cotizaciones/Cauciones",
-            "/api/v2/argentina/Titulos/Cauciones", 
-            "/api/v2/bCBA/Titulos/Cauciones",
-            "/api/v2/Cotizaciones/Instrumentos/Cauciones",
-            "/api/v2/Titulos/Cauciones/bCBA",
+        # Cauciones have symbols like CAUC1D, CAUC7D, CAUC14D, etc. (1 day, 7 days, 14 days)
+        # The format is: /api/v2/{mercado}/Titulos/{simbolo}/Cotizacion
+        caucion_symbols = [
+            ("CAUC1D", 1),   # 1 day
+            ("CAUC7D", 7),   # 7 days
+            ("CAUC14D", 14), # 14 days
+            ("CAUC30D", 30), # 30 days
         ]
         
-        for endpoint in endpoints_to_try:
+        mercados = ["bCBA", "BCBA", "argentina"]
+        cauciones = []
+        
+        # First, try to get the panel of cauciones
+        panel_endpoints = [
+            "/api/v2/Cotizaciones/Panel/Cauciones/argentina",
+            "/api/v2/bCBA/Titulos/Cauciones/Cotizacion",
+        ]
+        
+        for endpoint in panel_endpoints:
             url = f"{self.BASE_URL}{endpoint}"
             try:
-                print(f"Trying endpoint: {url}")
+                print(f"Trying panel: {url}")
                 response = requests.get(url, headers=self._get_headers(), timeout=30)
-
-                if response.status_code == 401:
-                    print("Token expired, re-authenticating...")
-                    if self.authenticate():
-                        response = requests.get(url, headers=self._get_headers(), timeout=30)
-                    else:
-                        continue
-
                 if response.status_code == 200:
                     data = response.json()
-                    print(f"SUCCESS with endpoint: {endpoint}")
-                    print(f"Response type: {type(data)}")
-                    if isinstance(data, dict):
-                        print(f"Keys: {data.keys()}")
-                        if 'titulos' in data:
-                            return data['titulos']
-                        return [data] if data else []
-                    return data if isinstance(data, list) else []
-
-                print(f"  -> {response.status_code}: {response.text[:200] if response.text else 'Empty'}")
-                
-            except requests.exceptions.RequestException as e:
-                print(f"  -> Request error: {e}")
-                continue
+                    print(f"SUCCESS with panel: {endpoint}")
+                    print(f"Data: {data}")
+                    if isinstance(data, dict) and 'titulos' in data:
+                        return data['titulos']
+                    if isinstance(data, list):
+                        return data
+                print(f"  -> {response.status_code}")
+            except Exception as e:
+                print(f"  -> Error: {e}")
         
-        print("All endpoints failed")
-        return []
+        # If panels fail, try individual symbols
+        for mercado in mercados:
+            print(f"Trying mercado: {mercado}")
+            for symbol, days in caucion_symbols:
+                url = f"{self.BASE_URL}/api/v2/{mercado}/Titulos/{symbol}/Cotizacion"
+                try:
+                    response = requests.get(url, headers=self._get_headers(), timeout=30)
+                    if response.status_code == 200:
+                        data = response.json()
+                        data['plazo'] = days
+                        data['symbol'] = symbol
+                        cauciones.append(data)
+                        print(f"  Got {symbol}: {data.get('ultimoPrecio', 'N/A')}")
+                except Exception as e:
+                    continue
+            
+            if cauciones:
+                print(f"Found {len(cauciones)} cauciones in {mercado}")
+                return cauciones
+        
+        # Try alternative approach - get all instruments and filter
+        print("Trying to get all instruments...")
+        try:
+            url = f"{self.BASE_URL}/api/v2/Operaciones"
+            response = requests.get(url, headers=self._get_headers(), timeout=30)
+            if response.status_code == 200:
+                data = response.json()
+                print(f"Operaciones response keys: {data.keys() if isinstance(data, dict) else type(data)}")
+        except Exception as e:
+            print(f"Operaciones error: {e}")
+        
+        print("Could not fetch cauciones data")
+        return cauciones
 
     def get_caucion_by_days(self, days: int) -> Optional[dict]:
         """Get caucion data for a specific number of days."""
